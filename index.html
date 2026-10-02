@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Plumbing Service Portal</title>
+    <!-- Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX compilation in browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Supabase JS Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Supabase Credentials
+        const SUPABASE_URL = 'https://zfwvplsvnocjqdcbtgnc.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_dBBYbX3YDE-kH5ag-eGYGQ_ABIXwaOa';
+        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // Service Pricing Map & Numeric Values for Summary Calculation
+        const servicePrices = {
+            'Pipe Leak Repair': 'PKR 2,500',
+            'Drain Unclogging': 'PKR 3,000',
+            'Water Heater Install': 'PKR 5,500',
+            'General Plumbing Check': 'PKR 1,500'
+        };
+
+        const serviceNumericPrices = {
+            'Pipe Leak Repair': 2500,
+            'Drain Unclogging': 3000,
+            'Water Heater Install': 5500,
+            'General Plumbing Check': 1500
+        };
+
+        function App() {
+            const [session, setSession] = useState(null);
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [errorMsg, setErrorMsg] = useState('');
+            
+            // Theme State ('light' or 'dark')
+            const [darkMode, setDarkMode] = useState(false);
+
+            // Navigation Tab State ('bookings' or 'profile')
+            const [activeTab, setActiveTab] = useState('bookings');
+
+            // Dashboard States
+            const [bookings, setBookings] = useState([]);
+            const [serviceType, setServiceType] = useState('Pipe Leak Repair');
+            const [preferredDate, setPreferredDate] = useState('');
+            const [customerName, setCustomerName] = useState('');
+            const [phone, setPhone] = useState('');
+            const [address, setAddress] = useState('');
+            const [notes, setNotes] = useState('');
+
+            // Search & Filter States
+            const [searchQuery, setSearchQuery] = useState('');
+            const [statusFilter, setStatusFilter] = useState('All');
+
+            // Profile Settings States
+            const [newPassword, setNewPassword] = useState('');
+            const [profileMsg, setProfileMsg] = useState('');
+
+            useEffect(() => {
+                supabase.auth.getSession().then(({ data: { session } }) => {
+                    setSession(session);
+                    if (session) fetchBookings(session.user.id);
+                });
+
+                const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+                    setSession(session);
+                    if (session) fetchBookings(session.user.id);
+                });
+
+                return () => subscription.unsubscribe();
+            }, []);
+
+            const fetchBookings = async (userId) => {
+                const { data, error } = await supabase
+                    .from('bookings')
+                    .select('*')
+                    .eq('user_id', userId)
+                    .order('created_at', { ascending: false });
+
+                if (error) {
+                    console.error('Error fetching bookings:', error.message);
+                } else {
+                    setBookings(data || []);
+                }
+            };
+
+            const handleSignUp = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setErrorMsg('');
+                const { error } = await supabase.auth.signUp({ email, password });
+                if (error) setErrorMsg(error.message);
+                else alert('Signup successful! Check your email or login directly.');
+                setLoading(false);
+            };
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setErrorMsg('');
+                const { error } = await supabase.auth.signInWithPassword({ email, password });
+                if (error) setErrorMsg(error.message);
+                setLoading(false);
+            };
+
+            const handleLogout = async () => {
+                await supabase.auth.signOut();
+                setBookings([]);
+            };
+
+            const handleUpdatePassword = async (e) => {
+                e.preventDefault();
+                if (!newPassword) return;
+                setLoading(true);
+                setProfileMsg('');
+
+                const { error } = await supabase.auth.updateUser({ password: newPassword });
+                if (error) {
+                    setProfileMsg('Error: ' + error.message);
+                } else {
+                    setProfileMsg('Password updated successfully!');
+                    setNewPassword('');
+                }
+                setLoading(false);
+            };
+
+            const handleCreateBooking = async (e) => {
+                e.preventDefault();
+                if (!session) return;
+
+                const estimatedCost = servicePrices[serviceType] || 'N/A';
+                const fullNotes = `Name: ${customerName} | Phone: ${phone} | Address: ${address} | Cost: ${estimatedCost} | Note: ${notes}`;
+
+                const { error } = await supabase.from('bookings').insert([
+                    {
+                        user_id: session.user.id,
+                        service_type: serviceType,
+                        preferred_date: preferredDate,
+                        notes: fullNotes,
+                        status: 'Pending'
+                    }
+                ]);
+
+                if (error) {
+                    alert('Error creating booking: ' + error.message);
+                } else {
+                    setCustomerName('');
+                    setPhone('');
+                    setAddress('');
+                    setNotes('');
+                    setPreferredDate('');
+                    fetchBookings(session.user.id);
+                    alert('Booking created successfully!');
+                }
+            };
+
+            const handleCancelBooking = async (bookingId) => {
+                if (!confirm('Kya aap waqai is booking ko cancel karna chahte hain?')) return;
+
+                const { error } = await supabase
+                    .from('bookings')
+                    .delete()
+                    .eq('id', bookingId);
+
+                if (error) {
+                    alert('Error canceling booking: ' + error.message);
+                } else {
+                    fetchBookings(session.user.id);
+                }
+            };
+
+            const filteredBookings = bookings.filter((b) => {
+                const matchesSearch = 
+                    b.service_type.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                    (b.notes && b.notes.toLowerCase().includes(searchQuery.toLowerCase())) ||
+                    b.preferred_date.includes(searchQuery);
+
+                const matchesStatus = statusFilter === 'All' || b.status === statusFilter;
+
+                return matchesSearch && matchesStatus;
+            });
+
+            // Calculate Cost Summaries
+            const totalBookingsCount = bookings.length;
+            const pendingCount = bookings.filter(b => b.status === 'Pending').length;
+            const completedCount = bookings.filter(b => b.status === 'Completed').length;
+            
+            const totalEstimatedCost = bookings.reduce((acc, b) => {
+                return acc + (serviceNumericPrices[b.service_type] || 0);
+            }, 0);
+
+            if (!session) {
+                return (
+                    <div className={`min-h-screen flex items-center justify-center p-4 transition-colors ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'}`}>
+                        <div className={`max-w-md w-full rounded-xl shadow-lg p-8 border transition-colors ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-2xl font-bold text-sky-500">Plumbing Portal</h2>
+                                <button 
+                                    onClick={() => setDarkMode(!darkMode)}
+                                    className={`px-3 py-1 rounded-lg text-xs font-medium border ${darkMode ? 'border-slate-600 bg-slate-700 text-yellow-400' : 'border-slate-200 bg-slate-100 text-slate-700'}`}
+                                >
+                                    {darkMode ? '☀️ Light' : '🌙 Dark'}
+                                </button>
+                            </div>
+                            <p className={`text-sm mb-6 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Login or Sign up to manage your service requests</p>
+                            
+                            {errorMsg && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4">{errorMsg}</div>}
+
+                            <form className="space-y-4">
+                                <div>
+                                    <label className={`block text-sm font-medium mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Email Address</label>
+                                    <input 
+                                        type="email" 
+                                        value={email} 
+                                        onChange={(e) => setEmail(e.target.value)}
+                                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-sky-500 outline-none transition-colors ${darkMode ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400' : 'bg-white border-slate-300 text-slate-800'}`}
+                                        placeholder="name@example.com"
+                                    />
+                                </div>
+                                <div>
+                                    <label className={`block text-sm font-medium mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-700'}`}>Password</label>
+                                    <input 
+                                        type="password" 
+                                        value={password} 
+                                        onChange={(e) => setPassword(e.target.value)}
+                                        className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-sky-500 outline-none transition-colors ${darkMode ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400' : 'bg-white border-slate-300 text-slate-800'}`}
+                                        placeholder="••••••••"
+                                    />
+                                </div>
+                                <div className="flex gap-2 pt-2">
+                                    <button 
+                                        onClick={handleLogin}
+                                        disabled={loading}
+                                        className="flex-1 bg-sky-600 hover:bg-sky-700 text-white font-medium py-2 rounded-lg transition"
+                                    >
+                                        {loading ? 'Processing...' : 'Login'}
+                                    </button>
+                                    <button 
+                                        onClick={handleSignUp}
+                                        disabled={loading}
+                                        className={`flex-1 font-medium py-2 rounded-lg transition ${darkMode ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-800 hover:bg-slate-900 text-white'}`}
+                                    >
+                                        Sign Up
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className={`min-h-screen p-6 max-w-4xl mx-auto transition-colors ${darkMode ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800'}`}>
+                    <header className={`flex justify-between items-center p-4 rounded-xl shadow-sm mb-6 border transition-colors ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+                        <div>
+                            <h1 className="text-xl font-bold text-sky-500">Client Service Portal</h1>
+                            <p className={`text-xs ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Logged in as: {session.user.email}</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <button 
+                                onClick={() => setDarkMode(!darkMode)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${darkMode ? 'border-slate-600 bg-slate-700 text-yellow-400' : 'border-slate-200 bg-slate-100 text-slate-700'}`}
+                            >
+                                {darkMode ? '☀️ Light' : '🌙 Dark'}
+                            </button>
+                            <div className={`flex p-1 rounded-lg text-xs font-medium ${darkMode ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                                <button 
+                                    onClick={() => setActiveTab('bookings')}
+                                    className={`px-3 py-1.5 rounded-md transition ${activeTab === 'bookings' ? (darkMode ? 'bg-slate-600 text-sky-400 shadow-sm' : 'bg-white text-sky-600 shadow-sm') : (darkMode ? 'text-slate-300' : 'text-slate-600')}`}
+                                >
+                                    Bookings
+                                </button>
+                                <button 
+                                    onClick={() => setActiveTab('profile')}
+                                    className={`px-3 py-1.5 rounded-md transition ${activeTab === 'profile' ? (darkMode ? 'bg-slate-600 text-sky-400 shadow-sm' : 'bg-white text-sky-600 shadow-sm') : (darkMode ? 'text-slate-300' : 'text-slate-600')}`}
+                                >
+                                    Profile Settings
+                                </button>
+                            </div>
+                            <button 
+                                onClick={handleLogout}
+                                className="bg-red-50 hover:bg-red-100 text-red-600 px-3 py-2 rounded-lg text-xs font-medium transition"
+                            >
+                                Logout
+                            </button>
+                        </div>
+                    </header>
+
+                    {activeTab === 'bookings' ? (
+                        <div className="space-y-6">
+                            <div className="grid md:grid-cols-3 gap-6">
+                                {/* Booking Form */}
+                                <div className={`p-6 rounded-xl shadow-sm border md:col-span-1 transition-colors ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+                                    <h3 className={`font-bold text-lg mb-4 ${darkMode ? 'text-white' : 'text-slate-800'}`}>Book a Service</h3>
+                                    <form onSubmit={handleCreateBooking} className="space-y-4">
+                                        <div>
+                                            <label className={`block text-xs font-medium mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Service Type</label>
+                                            <select 
+                                                value={serviceType} 
+                                                onChange={(e) => setServiceType(e.target.value)}
+                                                className={`w-full px-3 py-2 border rounded-lg text-sm outline-none transition-colors ${darkMode ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                                            >
+                                                <option value="Pipe Leak Repair">Pipe Leak Repair</option>
+                                                <option value="Drain Unclogging">Drain Unclogging</option>
+                                                <option value="Water Heater Install">Water Heater Install</option>
+                                                <option value="General Plumbing Check">General Plumbing Check</option>
+                                            </select>
+                                        </div>
+                                        <div className={`p-3 rounded-lg flex justify-between items-center border transition-colors ${darkMode ? 'bg-slate-700 border-slate-600' : 'bg-sky-50 border-sky-100'}`}>
+                                            <span className={`text-xs font-medium ${darkMode ? 'text-sky-300' : 'text-sky-700'}`}>Estimated Cost:</span>
+                                            <span className={`text-sm font-bold ${darkMode ? 'text-sky-400' : 'text-sky-800'}`}>{servicePrices[serviceType]}</span>
+                                        </div>
+                                        <div>
+                                            <label className={`block text-xs font-medium mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Full Name</label>
+                                            <input 
+                                                type="text" 
+                                                required
+                                                value={customerName}
+                                                onChange={(e) => setCustomerName(e.target.value)}
+                                                placeholder="Ali Khan"
+                                                className={`w-full px-3 py-2 border rounded-lg text-sm outline-none transition-colors ${darkMode ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400' : 'bg-white border-slate-300 text-slate-800'}`}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className={`block text-xs font-medium mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Phone Number</label>
+                                            <input 
+                                                type="tel" 
+                                                required
+                                                value={phone}
+                                                onChange={(e) => setPhone(e.target.value)}
+                                                placeholder="03001234567"
+                                                className={`w-full px-3 py-2 border rounded-lg text-sm outline-none transition-colors ${darkMode ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400' : 'bg-white border-slate-300 text-slate-800'}`}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className={`block text-xs font-medium mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Address</label>
+                                            <input 
+                                                type="text" 
+                                                required
+                                                value={address}
+                                                onChange={(e) => setAddress(e.target.value)}
+                                                placeholder="House #123, Street #..."
+                                                className={`w-full px-3 py-2 border rounded-lg text-sm outline-none transition-colors ${darkMode ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400' : 'bg-white border-slate-300 text-slate-800'}`}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className={`block text-xs font-medium mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Preferred Date</label>
+                                            <input 
+                                                type="date" 
+                                                required
+                                                value={preferredDate}
+                                                onChange={(e) => setPreferredDate(e.target.value)}
+                                                className={`w-full px-3 py-2 border rounded-lg text-sm outline-none transition-colors ${darkMode ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className={`block text-xs font-medium mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Additional Notes</label>
+                                            <textarea 
+                                                rows="2"
+                                                value={notes}
+                                                onChange={(e) => setNotes(e.target.value)}
+                                                placeholder="Describe the issue..."
+                                                className={`w-full px-3 py-2 border rounded-lg text-sm outline-none transition-colors ${darkMode ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400' : 'bg-white border-slate-300 text-slate-800'}`}
+                                            ></textarea>
+                                        </div>
+                                        <button 
+                                            type="submit"
+                                            className="w-full bg-sky-600 hover:bg-sky-700 text-white font-medium py-2 rounded-lg text-sm transition"
+                                        >
+                                            Submit Booking Form
+                                        </button>
+                                    </form>
+                                </div>
+
+                                {/* Bookings List with Search & Filter */}
+                                <div className={`p-6 rounded-xl shadow-sm border md:col-span-2 transition-colors ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+                                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
+                                        <h3 className={`font-bold text-lg ${darkMode ? 'text-white' : 'text-slate-800'}`}>Your Bookings</h3>
+                                        <div className="flex gap-2 w-full sm:w-auto">
+                                            <input 
+                                                type="text" 
+                                                placeholder="Search bookings..." 
+                                                value={searchQuery}
+                                                onChange={(e) => setSearchQuery(e.target.value)}
+                                                className={`px-3 py-1.5 border rounded-lg text-xs outline-none flex-1 sm:w-40 transition-colors ${darkMode ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400' : 'bg-white border-slate-300 text-slate-800'}`}
+                                            />
+                                            <select 
+                                                value={statusFilter}
+                                                onChange={(e) => setStatusFilter(e.target.value)}
+                                                className={`px-3 py-1.5 border rounded-lg text-xs outline-none transition-colors ${darkMode ? 'bg-slate-700 border-slate-600 text-white' : 'bg-white border-slate-300 text-slate-800'}`}
+                                            >
+                                                <option value="All">All Status</option>
+                                                <option value="Pending">Pending</option>
+                                                <option value="Completed">Completed</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {filteredBookings.length === 0 ? (
+                                        <p className={`text-sm text-center py-8 ${darkMode ? 'text-slate-500' : 'text-slate-400'}`}>No matching bookings found.</p>
+                                    ) : (
+                                        <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                                            {filteredBookings.map((b) => (
+                                                <div key={b.id} className={`p-4 border rounded-lg flex justify-between items-center transition-colors ${darkMode ? 'bg-slate-700/50 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                                                    <div className="pr-4">
+                                                        <h4 className={`font-semibold text-sm ${darkMode ? 'text-white' : 'text-slate-800'}`}>{b.service_type}</h4>
+                                                        <p className={`text-xs mt-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Date: {b.preferred_date}</p>
+                                                        {b.notes && <p className={`text-xs mt-1 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>{b.notes}</p>}
+                                                    </div>
+                                                    <div className="flex flex-col items-end gap-2">
+                                                        <span className={`px-3 py-1 rounded-full text-xs font-medium ${b.status === 'Completed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                            {b.status}
+                                                        </span>
+                                                        <button 
+                                                            onClick={() => handleCancelBooking(b.id)}
+                                                            className="text-xs text-red-500 hover:text-red-400 font-medium underline"
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Service Cost Summary Section */}
+                            <div className={`p-6 rounded-xl shadow-sm border transition-colors ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+                                <h3 className={`font-bold text-base mb-4 ${darkMode ? 'text-white' : 'text-slate-800'}`}>📊 Service Cost Summary</h3>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                                    <div className={`p-4 rounded-lg border transition-colors ${darkMode ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                                        <span className={`block text-xs font-medium ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Total Bookings</span>
+                                        <span className={`text-xl font-bold mt-1 block ${darkMode ? 'text-white' : 'text-slate-800'}`}>{totalBookingsCount}</span>
+                                    </div>
+                                    <div className={`p-4 rounded-lg border transition-colors ${darkMode ? 'bg-slate-700/40 border-slate-600' : 'bg-slate-50 border-slate-200'}`}>
+                                        <span className={`block text-xs font-medium ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Pending / Completed</span>
+                                        <span className="text-xl font-bold mt-1 block text-amber-500">{pendingCount} <span className="text-sm font-normal text-slate-400">/</span> <span className="text-green-500">{completedCount}</span></span>
+                                    </div>
+                                    <div className={`p-4 rounded-lg border col-span-2 transition-colors ${darkMode ? 'bg-sky-950/30 border-sky-900/50' : 'bg-sky-50/75 border-sky-100'}`}>
+                                        <span className={`block text-xs font-medium ${darkMode ? 'text-sky-300' : 'text-sky-700'}`}>Total Estimated Value</span>
+                                        <span className={`text-xl font-bold mt-1 block ${darkMode ? 'text-sky-400' : 'text-sky-800'}`}>PKR {totalEstimatedCost.toLocaleString()}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        /* Profile Settings Section */
+                        <div className={`p-6 rounded-xl shadow-sm border max-w-xl mx-auto transition-colors ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
+                            <h3 className={`font-bold text-lg mb-2 ${darkMode ? 'text-white' : 'text-slate-800'}`}>Account Settings</h3>
+                            <p className={`text-xs mb-6 ${darkMode ? 'text-slate-400' : 'text-slate-500'}`}>Manage your account credentials and security preferences.</p>
+
+                            {profileMsg && (
+                                <div className={`p-3 rounded-lg text-xs mb-4 ${profileMsg.includes('Error') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
+                                    {profileMsg}
+                                </div>
+                            )}
+
+                            <div className="space-y-4 mb-6 pb-6 border-b border-slate-700">
+                                <div>
+                                    <label className={`block text-xs font-medium mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>Registered Email</label>
+                                    <input 
+                                        type="email" 
+                                        disabled 
+                                        value={session.user.email} 
+                                        className={`w-full px-3 py-2 border rounded-lg text-sm cursor-not-allowed ${darkMode ? 'bg-slate-700 border-slate-600 text-slate-400' : 'bg-slate-100 border-slate-300 text-slate-500'}`}
+                                    />
+                                    <span className="text-[10px] text-slate-400 mt-1 block">Email address cannot be changed directly.</span>
+                                </div>
+                            </div>
+
+                            <form onSubmit={handleUpdatePassword} className="space-y-4">
+                                <h4 className={`font-semibold text-sm ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>Change Password</h4>
+                                <div>
+                                    <label className={`block text-xs font-medium mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>New Password</label>
+                                    <input 
+                                        type="password" 
+                                        required
+                                        placeholder="Enter new password"
+                                        value={newPassword}
+                                        onChange={(e) => setNewPassword(e.target.value)}
+                                        className={`w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500 transition-colors ${darkMode ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400' : 'bg-white border-slate-300 text-slate-800'}`}
+                                    />
+                                </div>
+                                <button 
+                                    type="submit"
+                                    disabled={loading}
+                                    className="bg-sky-600 hover:bg-sky-700 text-white font-medium px-4 py-2 rounded-lg text-xs transition"
+                                >
+                                    {loading ? 'Updating...' : 'Update Password'}
+                                </button>
+                            </form>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>

@@ -25,6 +25,9 @@
         const SUPABASE_ANON_KEY = 'sb_publishable_dBBYbX3YDE-kH5ag-eGYGQ_ABIXwaOa';
         const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+        // n8n Webhook Test URL
+        const N8N_WEBHOOK_URL = 'https://appiautomation.app.n8n.cloud/webhook-test/b9630d7d-0d1e-4098-abd5-72ab78c0f4e4';
+
         // Service Pricing Map & Numeric Values for Summary Calculation
         const servicePrices = {
             'Pipe Leak Repair': 'PKR 2,500',
@@ -145,6 +148,7 @@
                 const estimatedCost = servicePrices[serviceType] || 'N/A';
                 const fullNotes = `Name: ${customerName} | Phone: ${phone} | Address: ${address} | Cost: ${estimatedCost} | Note: ${notes}`;
 
+                // 1. Save to Supabase Database
                 const { error } = await supabase.from('bookings').insert([
                     {
                         user_id: session.user.id,
@@ -157,15 +161,38 @@
 
                 if (error) {
                     alert('Error creating booking: ' + error.message);
-                } else {
-                    setCustomerName('');
-                    setPhone('');
-                    setAddress('');
-                    setNotes('');
-                    setPreferredDate('');
-                    fetchBookings(session.user.id);
-                    alert('Booking created successfully!');
+                    return;
                 }
+
+                // 2. Trigger n8n Webhook
+                try {
+                    await fetch(N8N_WEBHOOK_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            user_email: session.user.email,
+                            service_type: serviceType,
+                            preferred_date: preferredDate,
+                            customer_name: customerName,
+                            phone: phone,
+                            address: address,
+                            notes: notes,
+                            estimated_cost: estimatedCost
+                        })
+                    });
+                    console.log('Webhook triggered successfully!');
+                } catch (webhookErr) {
+                    console.error('Webhook execution failed:', webhookErr);
+                }
+
+                // Reset form fields
+                setCustomerName('');
+                setPhone('');
+                setAddress('');
+                setNotes('');
+                setPreferredDate('');
+                fetchBookings(session.user.id);
+                alert('Booking created and sent to n8n successfully!');
             };
 
             const handleCancelBooking = async (bookingId) => {
@@ -479,31 +506,27 @@
                                         value={session.user.email} 
                                         className={`w-full px-3 py-2 border rounded-lg text-sm cursor-not-allowed ${darkMode ? 'bg-slate-700 border-slate-600 text-slate-400' : 'bg-slate-100 border-slate-300 text-slate-500'}`}
                                     />
-                                    <span className="text-[10px] text-slate-400 mt-1 block">Email address cannot be changed directly.</span>
                                 </div>
+                                <form onSubmit={handleUpdatePassword} className="space-y-4">
+                                    <div>
+                                        <label className={`block text-xs font-medium mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>New Password</label>
+                                        <input 
+                                            type="password" 
+                                            value={newPassword}
+                                            onChange={(e) => setNewPassword(e.target.value)}
+                                            placeholder="Enter new password"
+                                            className={`w-full px-3 py-2 border rounded-lg text-sm outline-none transition-colors ${darkMode ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400' : 'bg-white border-slate-300 text-slate-800'}`}
+                                        />
+                                    </div>
+                                    <button 
+                                        type="submit"
+                                        disabled={loading}
+                                        className="w-full bg-sky-600 hover:bg-sky-700 text-white font-medium py-2 rounded-lg text-sm transition"
+                                    >
+                                        {loading ? 'Updating...' : 'Update Password'}
+                                    </button>
+                                </form>
                             </div>
-
-                            <form onSubmit={handleUpdatePassword} className="space-y-4">
-                                <h4 className={`font-semibold text-sm ${darkMode ? 'text-slate-200' : 'text-slate-700'}`}>Change Password</h4>
-                                <div>
-                                    <label className={`block text-xs font-medium mb-1 ${darkMode ? 'text-slate-300' : 'text-slate-600'}`}>New Password</label>
-                                    <input 
-                                        type="password" 
-                                        required
-                                        placeholder="Enter new password"
-                                        value={newPassword}
-                                        onChange={(e) => setNewPassword(e.target.value)}
-                                        className={`w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-sky-500 transition-colors ${darkMode ? 'bg-slate-700 border-slate-600 text-white placeholder-slate-400' : 'bg-white border-slate-300 text-slate-800'}`}
-                                    />
-                                </div>
-                                <button 
-                                    type="submit"
-                                    disabled={loading}
-                                    className="bg-sky-600 hover:bg-sky-700 text-white font-medium px-4 py-2 rounded-lg text-xs transition"
-                                >
-                                    {loading ? 'Updating...' : 'Update Password'}
-                                </button>
-                            </form>
                         </div>
                     )}
                 </div>
